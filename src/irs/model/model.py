@@ -12,8 +12,13 @@ logging.basicConfig(level=logging.DEBUG)
 
 _logger = logging.getLogger(__name__)
 
-XML_NS = "{http://www.dgci.gov.pt/2009/Modelo3IRSv2024}"
 
+YEAR_NS_MAP = {
+    "2024": "http://www.dgci.gov.pt/2009/Modelo3IRSv2024",
+    "2025": "http://www.dgci.gov.pt/2009/Modelo3IRSv2025",
+}
+
+XML_NS = "{http://www.dgci.gov.pt/2009/Modelo3IRSv2025}"
 
 @attrs.define
 class Country:
@@ -87,7 +92,7 @@ class CapitalGains:
         )
 
     def declare(self, sales, xml_root):
-        _logger.info(xml_root)
+
         for index, sale in enumerate(sales):
             line = SaleRecord(**sale)
             line.linha += index
@@ -121,6 +126,7 @@ class IRS:
     annex_j: AnexoJ = attr.field(factory=AnexoJ)
     root: ET.Element = attr.field(default=None)
 
+    
     def declare(self, sales, fiscal_year):
         self.annex_j.declare(sales, xml_root=self.root.find(f".//{XML_NS}AnexoJ"))
 
@@ -129,13 +135,18 @@ class IRS:
         self.root = tree.getroot()
 
     def export(self, output):
-        ET.register_namespace("", "http://www.dgci.gov.pt/2009/Modelo3IRSv2024")
+        # Register the default namespace without a prefix
+        ET.register_namespace("", XML_NS.strip("{}"))
         tree = ET.ElementTree(self.root)
         ET.indent(tree, "")
 
-        tree.write(
-            output,
-            encoding="utf-8",
-            xml_declaration=True,
-            short_empty_elements=True,
-        )
+        # Convert to string and use lxml for better formatting
+        xml_string = ET.tostring(self.root, encoding="utf-8", xml_declaration=True)
+        from lxml import etree
+        parser = etree.XMLParser(remove_blank_text=True)
+        root = etree.fromstring(xml_string, parser)
+        etree.indent(root, space="")
+        
+        # Write with lxml which handles empty elements better
+        with open(output, "wb") as f:
+            f.write(etree.tostring(root, encoding="utf-8", xml_declaration=True, pretty_print=True))

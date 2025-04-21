@@ -3,6 +3,12 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# User defined
+data/
+input/
+output/
+poetry.lock
+
 # C extensions
 *.so
 

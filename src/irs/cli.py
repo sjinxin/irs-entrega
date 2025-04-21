@@ -2,11 +2,17 @@ import logging
 import typing as t
 import xml.etree.ElementTree as ET
 import pathlib
-from degiro import Portfolio
-from irs import IRS
+from datetime import datetime
+from irs.broker.degiro import Portfolio
+from irs.model.model import IRS
+
 import argparse
 
-logging.basicConfig(level=logging.DEBUG)
+# Configure logging for all modules
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -42,6 +48,20 @@ def parse_arguments():
     parser.add_argument(
         "-o", "--output", type=pathlib.Path, default="output/output.xml"
     )
+    parser.add_argument(
+        "-y",
+        "--year",
+        type=int,
+        default=datetime.now().year - 1,
+        help="Fiscal year for the declaration (default: previous year)",
+    )
+    parser.add_argument(
+        "-t",
+        "--tax-id",
+        type=str,
+        required=True,
+        help="Tax identification number (NIF)",
+    )
     # Parse the arguments
     args = parser.parse_args()
     return args
@@ -49,11 +69,13 @@ def parse_arguments():
 
 def main():
     args = parse_arguments()
-    portfolio = Portfolio.from_transaction_csv_files(input_dir=args.data)
+    data_dir = f'{args.data}/{args.tax_id}'
+    portfolio = Portfolio.from_transaction_csv_files(input_dir=data_dir)
+    portfolio.summary()
     sales, _ = portfolio.declare()
     irs = IRS()
     irs.load(args.input)
-    irs.declare(sales, fiscal_year=2023)
+    irs.declare(sales, fiscal_year=args.year)
     irs.export(args.output)
 
 
