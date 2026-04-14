@@ -34,7 +34,7 @@ poetry install
 poetry shell
 
 # Run the tool
-irs -i input/declaration.xml -d data/ -o output/result.xml -t YOUR_TAX_ID
+poetry run irs -i input/declaration.xml -d data/ -o output/result.xml -t YOUR_TAX_ID
 ```
 
 ### Command Line Arguments

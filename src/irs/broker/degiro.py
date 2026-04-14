@@ -4,7 +4,6 @@ import logging
 import os
 import typing as t
 import uuid
-from collections import namedtuple
 from datetime import datetime
 
 import attr
@@ -167,6 +166,8 @@ class Portfolio:
         positions_by_name = sorted(open_positions, key=lambda p: p.name.lower())
         headers = ["Product", "ISIN", "Unit"]
         table_data = [(p.name, p.isin, p.unit) for p in positions_by_name]
+        if not table_data:
+            return "No open positions."
         return tabulate(
             table_data,
             headers,
@@ -177,21 +178,74 @@ class Portfolio:
     @classmethod
     def from_transaction_csv_files(cls, input_dir):
         instance = cls()
-        instance.load(cls.read(input_dir))
+        instance.load(cls.harmonize_data(cls.read(input_dir)))
         return instance
 
-    def load(self, data):
+    @staticmethod
+    def _pick(item: dict, *keys, default=""):
+        for key in keys:
+            if key in item and item[key] not in (None, ""):
+                return item[key]
+        return default
+
+    @staticmethod
+    def _to_float(value):
+        if value in (None, ""):
+            return 0.0
+        raw = str(value).strip().replace('"', "")
+        if "," in raw and "." in raw:
+            if raw.rfind(",") > raw.rfind("."):
+                raw = raw.replace(".", "").replace(",", ".")
+            else:
+                raw = raw.replace(",", "")
+        elif "," in raw:
+            raw = raw.replace(",", ".")
+        return float(raw)
+
+    @classmethod
+    def harmonize_data(cls, raw_rows: t.List[dict]) -> t.List[dict]:
+        harmonized = []
+        for row in raw_rows:
+            order_id = cls._pick(row, "id_da_ordem", "order_id")
+            # Newer EN DEGIRO exports can place the order id in trailing blank column.
+            if not order_id and "product" in row:
+                fallback_order_id = cls._pick(row, "empty_field_17")
+                if fallback_order_id and fallback_order_id != "EUR":
+                    order_id = fallback_order_id
+
+            harmonized.append(
+                {
+                    "date": cls._pick(row, "data", "date"),
+                    "isin": cls._pick(row, "isin"),
+                    "name": cls._pick(row, "produto", "product"),
+                    "order_id": order_id,
+                    "value": cls._to_float(
+                        cls._pick(row, "valor", "value_eur", "valor_local")
+                    ),
+                    "unit": int(cls._to_float(cls._pick(row, "quantidade", "quantity"))),
+                    "unit_value": cls._to_float(cls._pick(row, "precos", "price")),
+                    "commission": cls._to_float(
+                        cls._pick(
+                            row,
+                            "custos_de_transacao",
+                            "transaction_and/or_third_party_fees_eur",
+                        )
+                    ),
+                }
+            )
+        return harmonized
+
+    def load(self, data: t.List[dict]):
         for item in data:
-            # _logger.debug(f"process line {item.produto}")
-            order_id = item.id_da_ordem
-            isin = item.isin
-            name = item.produto
+            order_id = item["order_id"]
+            isin = item["isin"]
+            name = item["name"]
             txn = Transaction(
-                date=datetime.strptime(item.data, "%d-%m-%Y"),
-                value=float(item.valor),
-                unit=int(item.quantidade),
-                unit_value=item.precos,
-                commission=float(item.custos_de_transacao or "0.0"),
+                date=datetime.strptime(item["date"], "%d-%m-%Y"),
+                value=item["value"],
+                unit=item["unit"],
+                unit_value=item["unit_value"],
+                commission=item["commission"],
             )
             split = False
             if not order_id:
@@ -211,16 +265,26 @@ class Portfolio:
 
     @staticmethod
     def read(input_dir) -> t.List:
-        data = set()
-        # Replace with your field names
+        data = []
         for file_path in glob.glob(os.path.join(input_dir, "*.csv")):
             with open(file_path, "r", encoding="utf-8") as file:
-                reader = csv.DictReader(file)
-                fields = list(map(normalize, dict.fromkeys(reader.fieldnames)))
-                Row = namedtuple("Row", fields)
+                reader = csv.reader(file)
+                raw_headers = next(reader, [])
+                headers = []
+                seen = {}
+                for index, header in enumerate(raw_headers):
+                    normalized = normalize(header)
+                    if normalized == "empty_field":
+                        normalized = f"empty_field_{index}"
+                    if normalized in seen:
+                        seen[normalized] += 1
+                        normalized = f"{normalized}_{seen[normalized]}"
+                    else:
+                        seen[normalized] = 0
+                    headers.append(normalized)
                 for row in reader:
-                    data.add(Row(*row.values()))
-        return sorted(list(data))
+                    data.append(dict(zip(headers, row)))
+        return data
 
     def declare(self) -> t.Tuple[t.List[t.Tuple], t.Optional[t.List]]:
         records = []

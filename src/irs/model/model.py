@@ -17,9 +17,10 @@ _logger = logging.getLogger(__name__)
 YEAR_NS_MAP = {
     "2024": "http://www.dgci.gov.pt/2009/Modelo3IRSv2024",
     "2025": "http://www.dgci.gov.pt/2009/Modelo3IRSv2025",
+    "2026": "http://www.dgci.gov.pt/2009/Modelo3IRSv2026",
 }
 
-XML_NS = "{http://www.dgci.gov.pt/2009/Modelo3IRSv2025}"
+XML_NS = f"{{{YEAR_NS_MAP['2026']}}}"
 
 
 COUTRY_CODE_MAP = dict(US=840, IE=372, DE=276, GB=826)
@@ -91,6 +92,13 @@ class CapitalGains:
 
     sales_of_shares_and_securities: t.List[SaleRecord] = attr.field(factory=list)
 
+    @staticmethod
+    def _get_or_create(parent: ET.Element, tag: str) -> ET.Element:
+        node = parent.find(tag)
+        if node is None:
+            node = ET.SubElement(parent, tag)
+        return node
+
     def generate_content(self, parent, ns, line: SaleRecord):
         linha = ET.SubElement(parent, f"{ns}AnexoJq092AT01-Linha")
         linha.set("numero", str(line.linha))
@@ -127,7 +135,8 @@ class CapitalGains:
         total_acquisition = 0.0
         total_expenses = 0.0
 
-        q092AT01 = xml_root.find(f".//{XML_NS}AnexoJq092AT01")
+        quadro09 = self._get_or_create(xml_root, f"{XML_NS}Quadro09")
+        q092AT01 = self._get_or_create(quadro09, f"{XML_NS}AnexoJq092AT01")
         for index, sale in enumerate(sales):
             line = SaleRecord(**sale)
             line.linha += index
@@ -139,18 +148,17 @@ class CapitalGains:
 
         # Add the sum elements as siblings to AnexoJq092AT01
 
-        Quadro09 = xml_root.find(f".//{XML_NS}Quadro09")
         # Create sum elements
-        sum_c01 = ET.SubElement(Quadro09, f"{XML_NS}AnexoJq092AT01SomaC01")
+        sum_c01 = ET.SubElement(quadro09, f"{XML_NS}AnexoJq092AT01SomaC01")
         sum_c01.text = f"{total_realization:.2f}"
 
-        sum_c02 = ET.SubElement(Quadro09, f"{XML_NS}AnexoJq092AT01SomaC02")
+        sum_c02 = ET.SubElement(quadro09, f"{XML_NS}AnexoJq092AT01SomaC02")
         sum_c02.text = f"{total_acquisition:.2f}"
 
-        sum_c03 = ET.SubElement(Quadro09, f"{XML_NS}AnexoJq092AT01SomaC03")
+        sum_c03 = ET.SubElement(quadro09, f"{XML_NS}AnexoJq092AT01SomaC03")
         sum_c03.text = f"{total_expenses:.2f}"
 
-        sum_c04 = ET.SubElement(Quadro09, f"{XML_NS}AnexoJq092AT01SomaC04")
+        sum_c04 = ET.SubElement(quadro09, f"{XML_NS}AnexoJq092AT01SomaC04")
         sum_c04.text = f"{0:.2f}"
 
 
@@ -180,13 +188,20 @@ class IRS:
     root: ET.Element = attr.field(default=None)
 
     def declare(self, sales, fiscal_year):
+        annex_j_root = self.root.find(f".//{XML_NS}AnexoJ")
+        if annex_j_root is None:
+            annex_j_root = ET.SubElement(self.root, f"{XML_NS}AnexoJ")
         self.annex_j.declare(
-            sales, fiscal_year, xml_root=self.root.find(f".//{XML_NS}AnexoJ")
+            sales, fiscal_year, xml_root=annex_j_root
         )
 
     def load(self, file: pathlib.Path):
         tree = ET.parse(str(file))
         self.root = tree.getroot()
+        if self.root.tag.startswith("{"):
+            namespace_uri = self.root.tag.split("}", 1)[0][1:]
+            global XML_NS
+            XML_NS = f"{{{namespace_uri}}}"
 
     def export(self, output):
         # Register the default namespace without a prefix
